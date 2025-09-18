@@ -1,20 +1,17 @@
 name: Game Tick Cron Job
 
 on:
-    # 1. Runs on a schedule (every 5 minutes)
-    schedule:
-        - cron: '*/5 * * * *'
-        
-        # 2. Allows you to run it manually from the Actions tab in GitHub
-        workflow_dispatch:
-            
+  schedule:
+    - cron: '*/5 * * * *'  # Runs every 5 minutes
+  workflow_dispatch:        # Allows you to run it manually
+
 jobs:
-            invoke-game-tick:
-                runs-on: ubuntu-latest
-                steps:
-                    - name: Invoke Supabase Edge Function
-                    run: |
-          curl -X POST '${{ secrets.SUPABASE_FUNCTION_URL }}/game-tick' \
+  invoke-game-tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke Supabase Edge Function
+        run: |
+          curl -X POST '${{ secrets.SUPABASE_FUNCTION_URL }}' \
           -H 'apiKey: ${{ secrets.SUPABASE_ANON_KEY }}' \
           -H 'Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}' \
           -H 'Content-Type: application/json' \
