@@ -10,6 +10,8 @@ const SUPPORTED_LEAGUE_IDS = [
   "4328", // NFL
 ]
 
+const DAY_OFFSETS = [-1, 0, 1];
+
 function parseGameTime(date, time) {
   if (!date) {
     console.warn('Missing dateEvent, using current time');
@@ -39,7 +41,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
-
+  
   console.log('game-tick function invoked.');
 
   try {
@@ -57,25 +59,38 @@ Deno.serve(async (req) => {
     console.log('Supabase client created.');
 
     let allGames = [];
-    console.log(`Fetching from TheSportsDB for ${SUPPORTED_LEAGUE_IDS.length} leagues...`);
-
+    
     for (const leagueId of SUPPORTED_LEAGUE_IDS) {
-      // Fetch upcoming games
-      const nextUrl = `https://www.thesportsdb.com/api/v1/json/${SPORTS_API_KEY}/eventsnextleague.php?id=${leagueId}`;
-      const nextResponse = await fetch(nextUrl);
-      if (!nextResponse.ok) throw new Error(`Failed to fetch next events for league ${leagueId}`);
-      const nextData = await nextResponse.json();
-      if (nextData.events) allGames.push(...nextData.events);
-
-      // Fetch recent games
-      const lastUrl = `https://www.thesportsdb.com/api/v1/json/${SPORTS_API_KEY}/eventslastleague.php?id=${leagueId}`;
-      const lastResponse = await fetch(lastUrl);
-      if (!lastResponse.ok) throw new Error(`Failed to fetch last events for league ${leagueId}`);
-      const lastData = await lastResponse.json();
-      if (lastData.events) allGames.push(...lastData.events);
+      console.log(`Fetching data for league ${leagueId}...`);
+      
+      for (const dayOffset of DAY_OFFSETS) {
+        const date = new Date();
+        date.setDate(date.getDate() + dayOffset);
+        const dateString = date.toISOString().split('T')[0]; // "YYYY-MM-DD"
+        
+        const url = `https://www.thesportsdb.com/api/v1/json/${SPORTS_API_KEY}/eventsday.php?d=${dateString}&l=${leagueId}`;
+        
+        console.log(`Fetching from: ${url}`);
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.error(`Failed to fetch events for ${dateString}, league ${leagueId}`);
+        } else {
+          const data = await response.json();
+          if (data.events) {
+            allGames.push(...data.events);
+          }
+        }
+      }
     }
 
     console.log(`Found ${allGames.length} total games.`);
+
+    if (allGames.length === 0) {
+      return new Response(JSON.stringify({ message: 'No games found to update.' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     let gamesToUpsert;
     try {
@@ -102,10 +117,12 @@ Deno.serve(async (req) => {
       throw new Error(`Error during data mapping: ${mapError.message}`);
     }
 
-    console.log(`Upserting ${gamesToUpsert.length} games...`);
+    const uniqueGames = Array.from(new Map(gamesToUpsert.map(game => [game.api_game_id, game])).values());
+    
+    console.log(`Upserting ${uniqueGames.length} unique games...`);
     const { error } = await supabase
       .from('games')
-      .upsert(gamesToUpsert, { onConflict: 'api_game_id' })
+      .upsert(uniqueGames, { onConflict: 'api_game_id' })
 
     if (error) {
       console.error('Supabase upsert error:', error);
@@ -121,7 +138,7 @@ Deno.serve(async (req) => {
       .lt('start_time', oneHourAgo)
 
     console.log('Function complete.');
-    return new Response(JSON.stringify({ message: 'Game tick successful', updated: gamesToUpsert.length }), {
+    return new Response(JSON.stringify({ message: 'Game tick successful', updated: uniqueGames.length }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
