@@ -8,15 +8,11 @@ on:
 jobs:
   invoke-game-tick:
     runs-on: ubuntu-latest
-    env:
-      FUNCTION_URL: ${{ secrets.SUPABASE_FUNCTION_URL }}
-      ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - name: Invoke Supabase Edge Function
         run: |
-          curl -X POST '$FUNCTION_URL' \
-          -H 'apiKey: $ANON_KEY' \
-          -H 'Authorization: Bearer $SERVICE_ROLE_KEY' \
+          curl -X POST '${{ secrets.SUPABASE_FUNCTION_URL }}' \
+          -H 'apiKey: ${{ secrets.SUPABASE_ANON_KEY }}' \
+          -H 'Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}' \
           -H 'Content-Type: application/json' \
           --data '{}'
