@@ -1,27 +1,122 @@
-import React, { useState } from 'react'
-import { useRealtimeGameList } from '../hooks/useRealtimeGameList'
+import React, { useState, useEffect } from 'react'
+import { supabase } from '../supabaseClient'
 import GamePanel from './GamePanel'
 import GameLobby from './GameLobby'
 import Header from './Header'
 
+function useRealtimeGameList() {
+  const [loading, setLoading] = useState(true)
+  const [games, setGames] = useState([])
+
+  const fetchGames = async () => {
+    const now = new Date()
+    const soon = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString()
+    const recent = new Date(now.getTime() - 72 * 60 * 60 * 1000).toISOString()
+
+    const { data, error } = await supabase
+      .from('games')
+      .select('*')
+      .or(
+        `status.eq.Live,` +
+        `and(status.eq.Upcoming,start_time.lte.${soon},start_time.gte.${now.toISOString()}),` +
+        `and(status.eq.Completed,start_time.gte.${recent})`
+      )
+    
+    if (error) console.error('Error fetching games:', error)
+    else setGames(data || [])
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchGames()
+
+    const channel = supabase
+      .channel('live-games-list')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'games' },
+        (payload) => {
+          fetchGames()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
+  return { loading, games }
+}
+
+function formatGameTime(startTimeStr) {
+  const date = new Date(startTimeStr)
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function GameCard({ game, onClick }) {
+  let cardStyles = "bg-gray-800"
+  let timeLabel = formatGameTime(game.start_time)
+  
+  if (game.status === 'Live') {
+    cardStyles = "bg-red-700 animate-pulse"
+    timeLabel = "LIVE NOW"
+  } else if (game.status === 'Completed') {
+    cardStyles = "bg-gray-600 opacity-70"
+  }
+
+  return (
+    <button
+      onClick={() => onClick(game)}
+      className={`${cardStyles} p-4 rounded-lg shadow-lg text-white transition-transform hover:scale-105`}
+    >
+      <div className="flex justify-between items-center">
+        <img src={game.team_a_logo} alt={game.team_a_name} className="h-16 w-16 object-contain" />
+        <div className="text-center">
+          <span className="text-3xl font-bold">
+            {game.real_score_a} - {game.real_score_b}
+          </span>
+          <div className="text-sm font-semibold text-yellow-300">{timeLabel}</div>
+        </div>
+        <img src={game.team_b_logo} alt={game.team_b_name} className="h-16 w-16 object-contain" />
+      </div>
+      <div className="mt-3 font-semibold">
+        {game.team_a_name} vs. {game.team_b_name}
+      </div>
+    </button>
+  )
+}
+
 export default function LiveGameList({ session, onGameJoined }) {
   const { loading, games } = useRealtimeGameList() 
-  
   const [selectedGame, setSelectedGame] = useState(null)
   const [view, setView] = useState('list')
+
+  const liveGames = games
+    .filter(g => g.status === 'Live')
+  
+  const upcomingGames = games
+    .filter(g => g.status === 'Upcoming')
+    .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
+    
+  const completedGames = games
+    .filter(g => g.status === 'Completed')
+    .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
 
   const handleGameClick = (game) => {
     setSelectedGame(game)
   }
-
   const handlePanelClose = () => {
     setSelectedGame(null)
   }
-
   const handlePanelPlay = () => {
     setView('lobby')
   }
-
   const handleLobbyJoin = (gameId) => {
     onGameJoined(gameId)
   }
@@ -35,47 +130,58 @@ export default function LiveGameList({ session, onGameJoined }) {
       <Header session={session} />
 
       <div className="p-4 md:p-8 max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold text-center mb-6">Live Trivia Games</h1>
         {loading && <div className="text-center">Loading live games...</div>}
 
         {!loading && games.length === 0 && (
           <div className="text-center text-gray-500">
-            No live games right now. Check back soon!
+            No games on the schedule. Check back soon!
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {games.map((game) => (
-            <button
-              key={game.id}
-              onClick={() => handleGameClick(game)}
-              className="bg-gray-800 p-4 rounded-lg shadow-lg text-white transition-transform hover:scale-105"
-            >
-              <div className="flex justify-between items-center">
-                <img src={game.team_a_logo} alt={game.team_a_name} className="h-16 w-16 object-contain" />
-                <div className="text-center">
-                  <span className="text-3xl font-bold">
-                    {game.real_score_a} - {game.real_score_b}
-                  </span>
-                  <div className="text-sm">{game.sport}</div>
-                </div>
-                <img src={game.team_b_logo} alt={game.team_b_name} className="h-16 w-16 object-contain" />
-              </div>
-              <div className="mt-3 font-semibold">
-                {game.team_a_name} vs. {game.team_b_name}
-              </div>
-            </button>
-          ))}
-        </div>
+        {/* Live Games */}
+        {liveGames.length > 0 && (
+          <section className="mb-8">
+            <h2 className="text-2xl font-bold mb-4">Live Now</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {liveGames.map((game) => (
+                <GameCard key={game.id} game={game} onClick={handleGameClick} />
+              ))}
+            </div>
+          </section>
+        )}
 
-        {selectedGame && (
-          <GamePanel
-            game={selectedGame}
-            onClose={handlePanelClose}
-            onPlay={handlePanelPlay}
-          />
+        {/* Upcoming Games */}
+        {upcomingGames.length > 0 && (
+          <section className="mb-8">
+            <h2 className="text-2xl font-bold mb-4">Starting Soon</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {upcomingGames.map((game) => (
+                <GameCard key={game.id} game={game} onClick={handleGameClick} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Completed Games */}
+        {completedGames.length > 0 && (
+          <section className="mb-8">
+            <h2 className="text-2xl font-bold mb-4">Recently Completed</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {completedGames.map((game) => (
+                <GameCard key={game.id} game={game} onClick={handleGameClick} />
+              ))}
+            </div>
+          </section>
         )}
       </div>
+
+      {selectedGame && (
+        <GamePanel
+          game={selectedGame}
+          onClose={handlePanelClose}
+          onPlay={handlePanelPlay}
+        />
+      )}
     </div>
   )
 }
