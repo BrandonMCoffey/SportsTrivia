@@ -1,34 +1,51 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useState, useEffect } from 'react'
+import { supabase } from './supabaseClient'
+import LoginScreen from './components/LoginScreen'
+import LiveGameList from './components/LiveGameList'
+import TriviaDisplay from './components/TriviaDisplay'
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [session, setSession] = useState(null)
+  const [currentGameId, setCurrentGameId] = useState(null)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setLoading(false)
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session)
+      }
+    )
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const handleGameJoined = (gameId) => {
+    setCurrentGameId(gameId)
+  }
+
+  const handleExitGame = () => {
+    setCurrentGameId(null)
+  }
+  
+  if (loading) {
+    return <div className="h-screen w-full flex items-center justify-center">Loading...</div>
+  }
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+    <div className="min-h-screen bg-gray-100">
+      {!session ? (
+        <LoginScreen />
+      ) : !currentGameId ? (
+        <LiveGameList session={session} onGameJoined={handleGameJoined} />
+      ) : (
+        <TriviaDisplay gameId={currentGameId} onExit={handleExitGame} />
+      )}
+    </div>
   )
 }
 

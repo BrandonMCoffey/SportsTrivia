@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 
-// A simple hook for the timer bar
 function useTimer(startTime, duration) {
   const [width, setWidth] = useState(100)
 

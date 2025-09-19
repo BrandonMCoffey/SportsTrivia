@@ -5,7 +5,6 @@ import Question from './Question'
 import Leaderboard from './Leaderboard'
 import PostGameAwards from './PostGameAwards'
 
-// This component shows the live scores at the top
 function Scoreboard({ game }) {
   const totalTriviaScore = game.team_a_trivia_score + game.team_b_trivia_score
   const teamAPercentage = totalTriviaScore > 0 ? (game.team_a_trivia_score / totalTriviaScore) * 100 : 50
@@ -56,12 +55,11 @@ function Scoreboard({ game }) {
 export default function TriviaDisplay({ gameId }) {
   const { loading, game } = useRealtimeGame(gameId)
   const [currentQuestion, setCurrentQuestion] = useState(null)
-  const [view, setView] = useState('leaderboard') // 'question', 'leaderboard', 'postgame'
+  const [view, setView] = useState('leaderboard')
 
   useEffect(() => {
     if (game) {
       if (game.current_question_id) {
-        // Fetch the question details
         const fetchQuestion = async () => {
           const { data, error } = await supabase
             .from('questions')
