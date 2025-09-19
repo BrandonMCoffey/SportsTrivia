@@ -4,8 +4,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 const SUPPORTED_LEAGUE_IDS = [
-  "4387",
-  "4391"
+  "NFL",
+  "NBA"
 ];
 const DAY_OFFSETS = [
   -1,
@@ -58,6 +58,7 @@ Deno.serve(async (req)=>{
         date.setDate(date.getDate() + dayOffset);
         const dateString = date.toISOString().split('T')[0]; // "YYYY-MM-DD"
         const url = `https://www.thesportsdb.com/api/v1/json/${SPORTS_API_KEY}/eventsday.php?d=${dateString}&l=${leagueId}`;
+        console.log(`Fetching league ${leagueId}from: ${url}`);
         const response = await fetch(url);
         if (!response.ok) {
           console.error(`Failed to fetch events for ${dateString}, league ${leagueId}`);
