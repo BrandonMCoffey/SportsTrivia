@@ -25,7 +25,7 @@ function Scoreboard({ game }) {
         
         {/* Real Score */}
         <div className="text-center px-4">
-          <div className="text-xs text-gray-400">LIVE</div>
+          <div className="text-xs text-gray-400">{game.status.toUpperCase()}</div>
           <div className="text-3xl md:text-5xl font-bold">{game.real_score_a} - {game.real_score_b}</div>
         </div>
         
@@ -52,14 +52,54 @@ function Scoreboard({ game }) {
   )
 }
 
-export default function TriviaDisplay({ gameId }) {
+function CountdownTimer({ startTime }) {
+  const [timeLeft, setTimeLeft] = useState('...')
+  
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = new Date().getTime()
+      const start = new Date(startTime).getTime()
+      const distance = start - now
+
+      if (distance < 0) {
+        setTimeLeft('Starting...')
+        clearInterval(timer)
+        return
+      }
+
+      const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60))
+      const seconds = Math.floor((distance % (1000 * 60)) / 1000)
+      setTimeLeft(`${minutes}m ${seconds}s`)
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [startTime])
+
+  return (
+    <div className="max-w-3xl mx-auto p-4 md:p-8">
+      <div className="bg-white p-6 rounded-lg shadow-lg text-center">
+        <h2 className="text-3xl font-bold text-center mb-6">Trivia Starting Soon!</h2>
+        <div className="text-6xl font-bold text-blue-600 mb-6">
+          {timeLeft}
+        </div>
+        <p className="text-xl text-gray-600">Get ready for the first question!</p>
+      </div>
+    </div>
+  )
+}
+
+export default function TriviaDisplay({ gameId, onExit }) {
   const { loading, game } = useRealtimeGame(gameId)
   const [currentQuestion, setCurrentQuestion] = useState(null)
-  const [view, setView] = useState('leaderboard')
+  const [view, setView] = useState('leaderboard') 
 
   useEffect(() => {
     if (game) {
-      if (game.current_question_id) {
+      if (game.status === 'Completed') {
+        setView('postgame')
+      } else if (game.status === 'Upcoming') {
+        setView('countdown')
+      } else if (game.status === 'Live' && game.current_question_id) {
         const fetchQuestion = async () => {
           const { data, error } = await supabase
             .from('questions')
@@ -73,13 +113,11 @@ export default function TriviaDisplay({ gameId }) {
           }
         }
         fetchQuestion()
-      } else if (!game.is_live) {
-        setView('postgame')
       } else {
-        setView('leaderboard')
+        setView('leaderboard') 
       }
     }
-  }, [game?.current_question_id, game?.is_live])
+  }, [game?.status, game?.current_question_id])
 
   if (loading || !game) {
     return <div className="h-screen flex items-center justify-center">Loading Game...</div>
@@ -89,7 +127,14 @@ export default function TriviaDisplay({ gameId }) {
     <div className="h-screen flex flex-col">
       <Scoreboard game={game} />
       
-      <div className="flex-1 overflow-y-auto bg-gray-100">
+      <div className="flex-1 overflow-y-auto bg-gray-100 relative">
+        <button 
+          onClick={onExit}
+          className="absolute top-4 right-4 bg-gray-700 text-white py-2 px-4 rounded-lg z-10"
+        >
+          &larr; Exit Game
+        </button>
+
         {view === 'question' && currentQuestion && (
           <Question key={currentQuestion.id} question={currentQuestion} game={game} />
         )}
@@ -98,6 +143,9 @@ export default function TriviaDisplay({ gameId }) {
         )}
         {view === 'postgame' && (
           <PostGameAwards game={game} />
+        )}
+        {view === 'countdown' && (
+          <CountdownTimer startTime={game.start_time} />
         )}
       </div>
     </div>

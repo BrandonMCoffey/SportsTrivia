@@ -29,15 +29,12 @@ function useRealtimeGameList() {
 
   useEffect(() => {
     fetchGames()
-
     const channel = supabase
       .channel('live-games-list')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'games' },
-        (payload) => {
-          fetchGames()
-        }
+        (payload) => fetchGames()
       )
       .subscribe()
 
@@ -60,20 +57,33 @@ function formatGameTime(startTimeStr) {
 }
 
 function GameCard({ game, onClick }) {
-  let cardStyles = "bg-gray-800"
-  let timeLabel = formatGameTime(game.start_time)
-  
+  const now = new Date()
+  const startTime = new Date(game.start_time)
+  const minutesUntilStart = (startTime.getTime() - now.getTime()) / 60000
+
+  const isJoinable = (game.status === 'Live') || (game.status === 'Upcoming' && minutesUntilStart <= 30)
+
+  let cardStyles = "bg-gray-800 transition-transform hover:scale-105"
+  let timeLabel = `Starts: ${formatGameTime(game.start_time)}`
+
   if (game.status === 'Live') {
-    cardStyles = "bg-red-700 animate-pulse"
+    cardStyles = "bg-red-700 animate-pulse transition-transform hover:scale-105"
     timeLabel = "LIVE NOW"
   } else if (game.status === 'Completed') {
     cardStyles = "bg-gray-600 opacity-70"
+    timeLabel = `Completed: ${formatGameTime(game.start_time)}`
+  } else if (isJoinable) {
+    cardStyles = "bg-green-600 transition-transform hover:scale-105"
+    timeLabel = `Starts in ${Math.round(minutesUntilStart)} mins!`
+  } else {
+    cardStyles = "bg-gray-800 opacity-60 cursor-not-allowed"
   }
 
   return (
     <button
       onClick={() => onClick(game)}
-      className={`${cardStyles} p-4 rounded-lg shadow-lg text-white transition-transform hover:scale-105`}
+      disabled={!isJoinable}
+      className={`${cardStyles} p-4 rounded-lg shadow-lg text-white`}
     >
       <div className="flex justify-between items-center">
         <img src={game.team_a_logo} alt={game.team_a_name} className="h-16 w-16 object-contain" />
@@ -95,7 +105,7 @@ function GameCard({ game, onClick }) {
 export default function LiveGameList({ session, onGameJoined }) {
   const { loading, games } = useRealtimeGameList() 
   const [selectedGame, setSelectedGame] = useState(null)
-  const [view, setView] = useState('list')
+  const [view, setView] = useState('list') 
 
   const liveGames = games
     .filter(g => g.status === 'Live')
@@ -128,17 +138,14 @@ export default function LiveGameList({ session, onGameJoined }) {
   return (
     <div>
       <Header session={session} />
-
       <div className="p-4 md:p-8 max-w-6xl mx-auto">
         {loading && <div className="text-center">Loading live games...</div>}
-
         {!loading && games.length === 0 && (
           <div className="text-center text-gray-500">
             No games on the schedule. Check back soon!
           </div>
         )}
 
-        {/* Live Games */}
         {liveGames.length > 0 && (
           <section className="mb-8">
             <h2 className="text-2xl font-bold mb-4">Live Now</h2>
@@ -150,7 +157,6 @@ export default function LiveGameList({ session, onGameJoined }) {
           </section>
         )}
 
-        {/* Upcoming Games */}
         {upcomingGames.length > 0 && (
           <section className="mb-8">
             <h2 className="text-2xl font-bold mb-4">Starting Soon</h2>
@@ -162,7 +168,6 @@ export default function LiveGameList({ session, onGameJoined }) {
           </section>
         )}
 
-        {/* Completed Games */}
         {completedGames.length > 0 && (
           <section className="mb-8">
             <h2 className="text-2xl font-bold mb-4">Recently Completed</h2>
