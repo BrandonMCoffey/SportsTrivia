@@ -35,8 +35,10 @@ export default function GameLobby({ game, onGameJoined }) {
   const handleJoin = async (team) => {
     try {
       const { error } = await supabase.functions.invoke('join-team', {
-        gameId: game.id,
-        team: team,
+        body: {
+          gameId: game.id,
+          team: team,
+        }
       })
       if (error) throw error
 
