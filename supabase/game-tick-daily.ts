@@ -26,13 +26,32 @@ function parseGameTime(date, time) {
 }
 
 function getGameStatus(apiStatus) {
-  if (!apiStatus) {
-    return 'Upcoming';
-  }
-  const status = apiStatus.toLowerCase();
-  if (status.includes('live')) return 'Live';
-  if (status.includes('finished') || status.includes('complete')) return 'Completed';
-  return 'Upcoming';
+  if (!apiStatus) return 'Upcoming'
+  const status = apiStatus.toLowerCase()
+  if (status.includes('live')) return 'Live'
+  if (status.includes('finished') || status.includes('complete')) return 'Completed'
+  return 'Upcoming'
+}
+
+function createGeminiPrompt(teamA, teamB, sport) {
+  return `
+    You are a sports trivia bot. Generate 20 trivia questions for an upcoming ${sport} game between the ${teamA} and the ${teamB}.
+    
+    Balance the categories between:
+    - Current team/player stats
+    - Team history
+    - Head-to-head rivalry facts
+    - Mascot/Arena trivia
+    - Famous records or moments
+
+    Return the output as a valid JSON array. Each object in the array must have four keys:
+    1. "category": (string) The question category (e.g., "History", "Player")
+    2. "question_text": (string) The question.
+    3. "options": (string) A string of 4 answer options, separated by a pipe character "|".
+    4. "correct_answer": (string) The exact text of the correct answer, which must be one of the options.
+
+    Do not include any text before or after the JSON array.
+  `
 }
 
 Deno.serve(async (req) => {
@@ -50,8 +69,8 @@ Deno.serve(async (req) => {
     }
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+    // 1. Fetch upcoming games from TheSportsDB
     let allGames = []
-    
     for (const leagueId of SUPPORTED_LEAGUE_IDS) {
       for (const dayOffset of DAY_OFFSETS) {
         const date = new Date()
@@ -85,42 +104,87 @@ Deno.serve(async (req) => {
     }
     console.log(`Found ${allGames.length} total games.`);
     
-    let gamesToUpsert;
-    try {
-      gamesToUpsert = allGames.map((apiGame) => {
-        const startTime = parseGameTime(apiGame.dateEvent, apiGame.strTime);
-        const status = getGameStatus(apiGame.strStatus);
-        return {
-          api_game_id: apiGame.idEvent,
-          sport: apiGame.strSport,
-          status: status,
-          start_time: startTime,
-          team_a_name: apiGame.strHomeTeam,
-          team_b_name: apiGame.strAwayTeam,
-          team_a_logo: apiGame.strHomeTeamBadge || 'default_logo_url',
-          team_b_logo: apiGame.strAwayTeamBadge || 'default_logo_url',
-          real_score_a: Number(apiGame.intHomeScore) || 0,
-          real_score_b: Number(apiGame.intAwayScore) || 0,
-          watch_links: {
-            'US': apiGame.strVideo
-          }
-        };
-      });
-    } catch (mapError) {
-      console.error('Error during data mapping:', mapError);
-      throw new Error(`Error during data mapping: ${mapError.message}`);
+    // 2. Upsert games into DB and get their IDs
+    const gamesToUpsert = allGames.map((apiGame) => ({
+      api_game_id: apiGame.idEvent,
+      sport: apiGame.strSport,
+      status: getGameStatus(apiGame.strStatus),
+      start_time: parseGameTime(apiGame.dateEvent, apiGame.strTime),
+      team_a_name: apiGame.strHomeTeam,
+      team_b_name: apiGame.strAwayTeam,
+      team_a_logo: apiGame.strHomeTeamBadge || 'default_logo_url',
+      team_b_logo: apiGame.strAwayTeamBadge || 'default_logo_url',
+      real_score_a: Number(apiGame.intHomeScore) || 0,
+      real_score_b: Number(apiGame.intAwayScore) || 0,
+      watch_links: { 'US': apiGame.strVideo }
+    }))
+    const uniqueGames = Array.from(new Map(gamesToUpsert.map(game => [game.api_game_id, game])).values())
+    console.log(`Upserting ${uniqueGames.length} unique games...`);
+    
+    const { data: upsertedGames, error: upsertError } = await supabase
+      .from('games')
+      .upsert(uniqueGames, { onConflict: 'api_game_id' })
+      .select('id, team_a_name, team_b_name, sport')
+    
+    if (upsertError)
+    {
+      console.error('Supabase upsert error:', upsertError);
+      throw new Error(`Supabase upsert error: ${upsertError.message}`);
     }
 
-    const uniqueGames = Array.from(new Map(gamesToUpsert.map(game => [game.api_game_id, game])).values());
-    console.log(`Upserting ${uniqueGames.length} unique games...`);
+    // 3. Generate Questions
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`
+    
+    for (const game of upsertedGames) {
+      const { data: existingQuestions, count } = await supabase
+        .from('questions')
+        .select('id', { count: 'exact', head: true })
+        .eq('game_id', game.api_game_id)
 
-    const { error } = await supabase.from('games').upsert(uniqueGames, {
-      onConflict: 'api_game_id'
-    });
+      if (count === 0) {
+        const prompt = createGeminiPrompt(game.team_a_name, game.team_b_name, game.sport)
+        const geminiResponse = await fetch(geminiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json" }
+          })
+        })
 
-    if (error) {
-      console.error('Supabase upsert error:', error);
-      throw new Error(`Supabase upsert error: ${error.message}`);
+        if (!geminiResponse.ok) continue // Skip this game if Gemini fails
+
+        const geminiData = await geminiResponse.json()
+        const jsonText = geminiData.candidates[0].content.parts[0].text
+        const questions = JSON.parse(jsonText)
+
+        const questionsToInsert = questions.map(q => ({
+          game_id: game.id,
+          category: q.category,
+          question_text: q.question_text,
+          options: q.options,
+          correct_answer: q.correct_answer
+        }))
+        
+        await supabase.from('questions').insert(questionsToInsert)
+      }
+    }
+
+    // 4. Cleanup Old Games
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+    const { data: completedGames, error: completedError } = await supabase
+      .from('games')
+      .select('id')
+      .eq('status', 'Completed')
+      .lt('start_time', threeDaysAgo)
+
+    if (completedError) console.error('Error fetching completed games for cleanup:', completedError)
+
+    if (completedGames && completedGames.length > 0) {
+      const gameIdsToDelete = completedGames.map(g => g.id)
+      
+      await supabase.from('questions').delete().in('game_id', gameIdsToDelete)
+      // await supabase.from('games').delete().in('id', gameIdsToDelete)
     }
 
     return new Response(JSON.stringify({ message: 'Daily schedule populated.', updated: uniqueGames.length }), {
