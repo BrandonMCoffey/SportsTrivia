@@ -1,0 +1,20 @@
+name: Game Tick (Daily Schedule)
+
+on:
+  schedule:
+    # Runs at 8:00 UTC every day
+    - cron: '0 8 * * *'
+  
+  workflow_dispatch:
+
+jobs:
+  invoke-game-tick-daily:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke Supabase Daily Function
+        run: |
+          curl -X POST '${{ secrets.SUPABASE_FUNCTION_URL }}/game-tick-daily' \
+          -H 'apiKey: ${{ secrets.SUPABASE_ANON_KEY }}' \
+          -H 'Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}' \
+          -H 'Content-Type: application/json' \
+          --data '{}'
