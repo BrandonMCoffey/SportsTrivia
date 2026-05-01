@@ -3,7 +3,7 @@ name: Game Tick (Daily Schedule)
 on:
   schedule:
     # Runs at 8:00 UTC every day
-    - cron: '0 8 * * *'
+    # - cron: '0 8 * * *'
   
   workflow_dispatch:
 
